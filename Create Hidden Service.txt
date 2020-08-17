@@ -1,0 +1,345 @@
+Lets create our own forum on the deep web :).
+
+In the end we will have a forum on the deep web using a hidden service, hosted on Whonix (for security purposes), with Nginx as the web server software (more secure then Apache), and phpBB 3.2.2 as our forum software backed by a MySql 5.5.58 database.
+It is important to note besides the default security Whonix provides, we wont be going into depth on hardening/securing phpBB, nginx, MySql or Whonix, that is for another article.
+Whonix does provide enough security that even if the Whonix workstation is compromised, unless there is an exploit which can get us out of the Whonix VM and VirtualBox VM, there isnt a possibilty that YOUR IP details will be leaked, only IPs of the tor network.
+The separation of the Gateway and Workstation ensures not even and infected Workstation with malware with root priviliges could cause an IP leak. Enough of all this read up on how Whonix works and what makes it secure.
+
+
+PART 1: The server
+------------------
+
+1) Install and setup Whonix, ensure everything is up to date.
+
+*** All of the below is to be done on the Whonix workstation ONLY, unless otherwise stated i.e. when setting up the hidden service***
+
+2) Install nginx 
+   * Information on installing, stopping, starting and location of nginx on the system can be found here: https://www.digitalocean.com/community/tutorials/how-to-install-nginx-on-debian-8)
+   ** Navigate to 127.0.0.1:80 using Firefox, Opera or Chromium (as tor browser didnt seem to connect to 127.0.0.1:80, not sure why) to check if nginx is up or in the terminal UWT_DEV_PASSTHROUGH=1 curl 127.0.0.1:80
+  2a) In terminal do `sudo apt-get install nginx`
+  2b) Start nginx `sudo systemctl start nginx`
+
+3) Install MySql (https://wiki.debian.org/MySql, https://www.rosehosting.com/blog/install-phpbb-3-on-a-debian-wheezy-vps/)
+  3a) In terminal do `sudo apt-get install mysql-server`
+      * During install choose a password and remember it (I chose Whonix default: changeme)
+  3b) once installed in the terminal:
+      mysql -u root -p
+      mysql> CREATE DATABASE phpbb;
+      mysql> GRANT ALL PRIVILEGES on phpbb.* TO 'phpbbuser'@'localhost' IDENTIFIED BY 'changeme';
+      mysql> FLUSH PRIVILEGES;
+      mysql> quit;
+  
+  We now have a databse called phpbb with a user: phpbbuser and password: changeme
+
+4) Install PHP (for phpBB to work), but we dont want apache with it so run these commands in the terminal in that exact order (https://justinnewman.com/HOWTO/php-without-Apache):
+
+    `sudo apt-get install php5-common`
+    `sudo apt-get install php5-cgi`
+    `sudo apt-get install php5-mysql`
+    `sudo apt-get install php5`
+    
+    additonally run:
+    
+    `sudo apt-get install php5-fpm`
+
+5) Download phpBB zip (https://www.phpbb.com/downloads/, https://www.phpbb.com/community/docs/INSTALL.html, https://www.phpbb.com/support/documents.php?mode=install&version=3#require) my version is 3.2.2
+
+6) Configure Nginx for php (https://www.sitepoint.com/setting-up-php-behind-nginx-with-fastcgi/, https://stackoverflow.com/questions/25591040/nginx-serves-php-files-as-downloads-instead-of-executing-them)
+   * Lets ensure php and Nginx are playing nice
+   ** /etc/nginx/nginx.conf nginx global config folder (fyi)
+   *** First lets get dolphin opened as root in the terminal do:
+      `kdesudo dolphin`
+      
+   6a) Now in the dolphin opened using the above command navigate to `/etc/nginx/sites-enabled/default` alter this line:
+   
+	# Add index.php to the list if you are using PHP
+	index index.html index.htm index.nginx-debian.html;
+	
+      to:
+      
+	# Add index.php to the list if you are using PHP
+	index index.html index.htm index.php index.nginx-debian.html;
+	
+	additionally to serve php files uncomment this section:
+	
+	#location ~ \.php$ {
+	#	include snippets/fastcgi-php.conf;
+	#
+	#	# With php5-cgi alone:
+	#	fastcgi_pass 127.0.0.1:9000;
+	#	# With php5-fpm:
+	#	fastcgi_pass unix:/var/run/php5-fpm.sock;
+	#}
+	
+	to:
+	
+	location ~ \.php$ {
+		include snippets/fastcgi-php.conf;
+	
+		# With php5-cgi alone:
+	#	fastcgi_pass 127.0.0.1:9000;
+		# With php5-fpm:
+		fastcgi_pass unix:/var/run/php5-fpm.sock;
+	}
+	
+    6b) Next (using the same dolphin with root access) navigate to `/var/www/html` and create a file called `index.php` with this as its contents:
+	
+	<?php
+	  phpinfo();
+	?>
+	
+    6c) In the terminal/Konsole restart nginx for the new config to be used: `sudo systemctl restart nginx` and for sanity sake do `sudo systemctl restart php5-fpm`
+    
+    6d) Test it out goto 127.0.0.1:80 and you should see information on your PHP
+ 
+ 
+PART 2: Marrying Nginx and phpBB
+--------------------------------
+
+***At this point we have a basic webserver up and running on Whonix, using Nginx and able to serve php files - of course not yet accessible to the internet or the deep web***
+ 
+Next we look at installing phpBB,connecting it to MySql, and making Nginx serve up pages (as some configuration changes are needed to make phpBB work on Nginx).
+
+***Make a backup of /etc/nginx/sites-available/default, just in case***
+
+1) Its time to setup phpBB and configure Nginx to work with it correctly. (https://www.phpbb.com/community/docs/INSTALL.html, http://nginxlibrary.com/phpbb-configuration/, https://github.com/widop/phpbb3/blob/master/docs/nginx.sample.conf, https://www.phpbb.com/community/viewtopic.php?t=2405881&p=14898571, https://area51.phpbb.com/phpBB/viewtopic.php?f=81&t=49426)
+   In the terminal/Konsole lets open dolphin with privileges: `kdesudo dolphin`
+  1a) Navigate to `/var/www/html` and delete all its contents and rename html to phpBB3.
+  1b) Unzip phpBB zip file downloaded in Part 1, step 5.
+  1c) Copy all files in the phpBB3 folder to `/var/www/phpBB3`
+  1d) Uncomment these lines in /etc/nginx/nginx.conf (adds compression ability for http):
+      
+	#gzip_vary on;
+	#gzip_proxied any;
+	#gzip_comp_level 6;
+	#gzip_buffers 16 8k;
+	#gzip_http_version 1.1;
+	#gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+	
+	to:
+	
+	gzip_vary on;
+	gzip_proxied any;
+	gzip_comp_level 6;
+	gzip_buffers 16 8k;
+	gzip_http_version 1.1;
+	gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+
+	
+  1e) Navigate to /etc/nginx/sites-available/default and replace all its contents with this: (THIS MIGHT BE BETTER https://github.com/phpbb/phpbb/blob/master/phpBB/docs/nginx.sample.conf) watch the upstrea, part might need to look like below. Check deafult file in same directory that works a charm
+  
+# Sample nginx configuration file for phpBB.
+# Global settings have been removed, copy them
+# from your system's nginx.conf.
+# Tested with nginx 0.8.35.
+
+# Catch-all server for requests to invalid hosts.
+# Also catches vulnerability scanners probing IP addresses.
+server {
+    server_tokens off;
+    # default specifies that this block is to be used when
+    # no other block matches.
+    listen 80 default;
+
+    server_name bogus;
+    return 444;
+    root /var/empty;
+}
+
+# The actual board domain.
+server {
+    server_tokens off;
+    #listen 80;
+    server_name 127.0.0.1;
+
+    root /var/www/phpBB3;
+    
+    #location /install/app.php {
+    #	    try_files $uri $uri/ /install/app.php?$query_string;
+   #}
+        
+    location / {
+	# phpbb uses index.htm
+	index index.php index.html index.htm;
+	try_files $uri $uri/ @rewriteapp;
+      }
+
+    location @rewriteapp {
+	  rewrite ^(.*)$ /app.php/$1 last;
+      }
+
+    # Deny access to internal phpbb files.
+    location ~ /(config\.php|common\.php|includes|cache|files|store|images/avatars/upload|phpbb|vendor) {
+	deny all;
+	# deny was ignored before 0.8.40 for connections over IPv6.
+	# Use internal directive to prohibit access on older versions.
+	internal;
+    }
+
+    # Pass the php scripts to fastcgi server specified in upstream declaration.
+    location ~ \.php$ {
+            fastcgi_pass php;
+            # Necessary for php.
+            fastcgi_param SCRIPT_FILENAME  $document_root$fastcgi_script_name;
+            # Unmodified fastcgi_params from nginx distribution.
+	    include fastcgi_params;
+    }
+
+    # Deny access to version control system directories.
+    location ~ /\.svn|/\.git {
+	deny all;
+	internal;
+    }
+}
+
+# If running php as fastcgi, specify php upstream.
+upstream php {
+    server unix:/var/run/php5-fpm.sock;
+}
+ 
+  1e) Now restart nginx via terminal/konsole `sudo systemctl restart nginx`
+  1f) You can now navigate to 127.0.0.1 in your browser and should see phpBB up and running :).
+
+2) Click on the install tab, the the install button
+   * Notice how some directories are not writable and are needed before we can continue
+   2a) Lets make them writable in the terminal/konsole do:
+	sudo chmod 666 '/var/www/phpBB3/config.php'
+	sudo chmod 777 '/var/www/phpBB3/store'
+	sudo chmod 777 '/var/www/phpBB3/cache'
+	sudo chmod 777 '/var/www/phpBB3/files'
+	sudo chmod 777 '/var/www/phpBB3/images/avatars/upload'
+
+    2b) Click retest requirements button and we should be directed to `Administration configuration` page.
+	Create an admin account, email (can fake it for now), and a password -dont forget it. I used: 
+	
+	username: administrator 
+	email: administrator@administrator.com 
+	password: @dm!n!str@t0r@123
+	
+    2c) Next we are taken to the `Database configuration` page, enter the db credentials you created earlier on:
+    
+	Database type: MySQL
+	Database server hostname or DSN: localhost
+	Database server port:
+	Database username: phpbbuser
+	Database password: changeme
+	Database name: phpbb
+	Prefix for tables in database: phpbb_
+	
+    2d) Go through other settings (I forgot to document the settings I chose :D)
+    
+After install make sure config.php is only writable by us `sudo chmod 644 '/var/www/phpBB3/config.php'`
+and also delete the entire install folder in `/var/www/phpBB3/` as this is a major security risk if not done.
+Also in /etc/nginx/sites-available/ change: (might differ if better file is used as in 1e)
+
+
+    location /install/app.php {
+    	    try_files $uri $uri/ /install/app.php?$query_string;
+    }
+   
+   to:
+   
+   
+    #location /install/app.php {
+    #	    try_files $uri $uri/ /install/app.php?$query_string;
+    #}
+    
+Restart nginx using: `sudo systemctl restart nginx`
+
+Now navigate to 127.0.0.1 in your firefox, opera or chromium browser and you should see our little board is up and running :)!
+
+Extras:
+
+Turn compression on in nginx /etc/nginx/nginx.conf and enable (by uncommenting) Gzip settings section and enable on the php board via the ACP
+Also good to notice error and access log paths for debugging purposes
+
+PART 3: Understanding the board
+-------------------------------
+
+https://www.phpbb.com/community/viewtopic.php?t=639205 - Modifying boards images, footer etc
+
+
+PART 4: Hardening
+------------------
+
+Nginx:
+
+https://www.acunetix.com/blog/articles/nginx-server-security-hardening-configuration-1/
+https://www.tecmint.com/nginx-web-server-security-hardening-and-performance-tips/
+Look into ModSecurity for Nginx
+
+Add server_tokens off in /etc/nginx/sites-available/default file to each server { } tag or could go in the nginx.conf for global off.
+
+MySQL:
+
+https://www.techrepublic.com/article/how-to-harden-mysql-security-with-a-single-command/
+https://www.upguard.com/articles/top-11-ways-to-improve-mysql-security
+https://dev.mysql.com/doc/refman/5.7/en/changing-mysql-user.html
+
+Run `sudo mysql_secure_installation` and follow instructions answer yes to all except perhaps changing password :)
+
+phpBB:
+
+https://sprhost.com/knowledgebase/49/phpBB3-Hardening.html
+https://www.siteground.com/phpbb-security.htm
+
+Whonix:
+
+https://www.whonix.org/wiki/System_Hardening_Checklist
+
+Penetration Testing suits:
+https://geekflare.com/online-scan-website-security-vulnerabilities/
+
+Onion vulnerablity testing:
+https://null-byte.wonderhowto.com/how-to/detect-misconfigurations-anonymous-dark-web-sites-with-onionscan-0181366/
+
+INSTALL GO and set GO PATH (for onion scan):
+----------------------------
+export GOPATH=/home/user/
+just a palce to put shit for go to work
+then get git `sudo apt-get install git`
+then installs deps: https://github.com/s-rah/onionscan/wiki
+then go `go get github.com/s-rah/onionscan`
+Fix openpgp error https://stackoverflow.com/a/31337344
+then do `go install github.com/s-rah/onionscan` 
+
+PART 5: Publishing to the Deep web:
+------------------------------------
+
+1) Lets setup a hidden service on whonix (https://www.whonix.org/wiki/Hidden_Services, https://www.torproject.org/docs/tor-onion-service)
+   *All work for setting up the hidden service will be done on the Whonix-Gateway.
+   1a) On the Gateway click the `Tor User Config` shortcut and enter your password.
+   1b) Add these lines to the end of the file:
+   
+      HiddenServiceDir /var/lib/tor/phpbb_hidden_service/
+      #HiddenServiceVersion 3
+      HiddenServicePort 80 10.152.152.11:80
+       
+   1c) Now save and reload (you should see all green any red means an error), I ran into some anonymizing layer error which I then 
+       simply clicked the `Restart Tor` shortcut and then the `Reload Tor` shortcut and all worked well
+       
+    1e) Now click the `Tor Data` shortcut and enter your password, open directory `phpbb_hidden_service` and in there is our hostname and private_key
+        hostname is the sites name remember this as we need to tell our workstation to listen for requests to that address
+        also back this folder up if you want to be able to move the site around and not generate a new onion each time.
+
+2) Now on the Whonix-Workstation open /etc/nginx/sites-available/ and change the server name from 127.0.0.1 -> the onion address generated by tor
+   Save the file and restart Nginx `sudo systemctl restart nginx`.
+   
+   next goto the goto the terminal log into mysql and update the server name and cookie name to match the onions:
+   
+   mysql -u root -p
+   mysql> USE phpbb
+   mysql> UPDATE phpbb_config SET config_value ='ONION_NAME.onion' WHERE config_name='cookie_domain';
+   mysql> UPDATE phpbb_config SET config_value ='ONION_NAME.onion' WHERE config_name='server_name';
+   mysql> quit;
+   
+   next goto /var/www/phpBB3/cache/ and delete all files (for the new server name to be used)
+   
+   now on your tor browser navigate to the onion :)!!
+
+Extras:
+Hiding our onion for now:
+https://matt.traudt.xyz/p/GmiiUPQL.html or creating private onion services.txt
+
+https://www.torproject.org/docs/tor-manual.html.en --  HiddenServiceAuthorizeClient
+    
